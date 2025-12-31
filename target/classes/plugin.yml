@@ -1,0 +1,21 @@
+name: SchematicHelper
+version: '1.0'
+main: ru.florestdev.schematicHelper.SchematicHelper
+api-version: '1.21'
+prefix: SchematicHelper
+load: STARTUP
+authors: [ FlorestDev ]
+description: Plugin for servers, who want to build beautiful buildings.
+depend:
+  - WorldEdit
+commands:
+  paste:
+    description: Paste schem to the world!
+    usage: /paste <имя файла>
+    permission: schematichelper.paste
+    permission-message: "§cYou haven't got 'schematichelper.paste' for this."
+
+permissions:
+  schematichelper.paste:
+    description: Разрешение на использование команды /paste
+    default: op

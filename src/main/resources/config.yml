@@ -1,0 +1,23 @@
+messages:
+  only-player: "&cOnly players can use this command!"
+  no-permission: "&cYou do not have permission!"
+  usage: "&cUsage: /paste <name|URL> [x] [y] [z]"
+  invalid-coords: "&cCoordinates must be numbers!"
+
+  not-found: "&cSchematic file not found!"
+  invalid-format: "&cOnly .schem files are supported!"
+
+  download-start: "&aDownloading schematic..."
+  paste-start: "&aStarting paste..."
+
+  progress: "&aPasting: &f%percent%%"
+  done: "&aSchematic pasted successfully!"
+
+  timeout: "&cConnection timed out!"
+  network-error: "&cNetwork error occurred!"
+  download-error: "&cFailed to download schematic!"
+
+  http-403: "&cAccess denied (HTTP 403)"
+  http-404: "&cFile not found (HTTP 404)"
+  http-5xx: "&cServer error (HTTP %code%)"
+  http-other: "&cHTTP error: %code%"
