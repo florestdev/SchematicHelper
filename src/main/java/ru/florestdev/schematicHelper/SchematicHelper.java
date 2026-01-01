@@ -1,9 +1,10 @@
 package ru.florestdev.schematicHelper;
 
-import com.sk89q.worldedit.WorldEdit;
 import com.sk89q.worldedit.EditSession;
+import com.sk89q.worldedit.WorldEdit;
 import com.sk89q.worldedit.bukkit.BukkitAdapter;
 import com.sk89q.worldedit.extent.clipboard.Clipboard;
+import com.sk89q.worldedit.extent.clipboard.io.ClipboardFormat;
 import com.sk89q.worldedit.extent.clipboard.io.ClipboardFormats;
 import com.sk89q.worldedit.extent.clipboard.io.ClipboardReader;
 import com.sk89q.worldedit.function.operation.Operation;
@@ -11,8 +12,6 @@ import com.sk89q.worldedit.function.operation.Operations;
 import com.sk89q.worldedit.math.BlockVector3;
 import com.sk89q.worldedit.session.ClipboardHolder;
 import com.sk89q.worldedit.world.World;
-import com.sk89q.worldedit.function.mask.BlockMask;
-import com.sk89q.worldedit.world.block.BlockTypes;
 
 import net.md_5.bungee.api.ChatMessageType;
 import net.md_5.bungee.api.chat.TextComponent;
@@ -24,7 +23,10 @@ import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitRunnable;
 
-import java.io.*;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -55,6 +57,8 @@ public final class SchematicHelper extends JavaPlugin {
 
         getLogger().info("SchematicHelper enabled.");
     }
+
+    // ===================== COMMAND =====================
 
     @Override
     public boolean onCommand(CommandSender sender, Command cmd, String label, String[] args) {
@@ -99,7 +103,7 @@ public final class SchematicHelper extends JavaPlugin {
                 player.sendMessage(color(msg("not-found")));
                 return true;
             }
-            pasteAsync(player, file, x, y, z);
+            pasteLayered(player, file, x, y, z);
         }
 
         return true;
@@ -122,37 +126,30 @@ public final class SchematicHelper extends JavaPlugin {
                 HttpResponse<byte[]> response =
                         httpClient.send(request, HttpResponse.BodyHandlers.ofByteArray());
 
-                int status = response.statusCode();
-
-                if (status != 200) {
-                    handleHttpError(player, status);
+                if (response.statusCode() != 200) {
+                    Bukkit.getScheduler().runTask(this,
+                            () -> handleHttpError(player, response.statusCode()));
                     return;
                 }
 
                 String fileName = new File(URI.create(url).getPath()).getName();
                 if (!fileName.endsWith(".schem")) {
-                    player.sendMessage(color(msg("invalid-format")));
+                    Bukkit.getScheduler().runTask(this,
+                            () -> player.sendMessage(color(msg("invalid-format"))));
                     return;
                 }
 
-                File outFile = new File(getDataFolder(), "schematics/" + fileName);
-                try (FileOutputStream fos = new FileOutputStream(outFile)) {
+                File out = new File(getDataFolder(), "schematics/" + fileName);
+                try (FileOutputStream fos = new FileOutputStream(out)) {
                     fos.write(response.body());
                 }
 
                 Bukkit.getScheduler().runTask(this,
-                        () -> pasteAsync(player, outFile, x, y, z));
+                        () -> pasteLayered(player, out, x, y, z));
 
-            } catch (java.net.http.HttpTimeoutException e) {
-                player.sendMessage(color(msg("timeout")));
-            } catch (IOException e) {
-                player.sendMessage(color(msg("network-error")));
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                player.sendMessage(color(msg("download-error")));
             } catch (Exception e) {
-                e.printStackTrace();
-                player.sendMessage(color(msg("download-error")));
+                Bukkit.getScheduler().runTask(this,
+                        () -> player.sendMessage(color(msg("download-error"))));
             }
         });
     }
@@ -169,55 +166,63 @@ public final class SchematicHelper extends JavaPlugin {
 
     // ===================== PASTE =====================
 
-    private void pasteAsync(Player player, File file, int x, int y, int z) {
+    private void pasteLayered(Player player, File file, int x, int y, int z) {
+
+        Clipboard clipboard;
+        ClipboardFormat format = ClipboardFormats.findByFile(file);
+        if (format == null) {
+            player.sendMessage(color(msg("invalid-format")));
+            return;
+        }
+
+        try (FileInputStream fis = new FileInputStream(file);
+             ClipboardReader reader = format.getReader(fis)) {
+            clipboard = reader.read();
+        } catch (IOException e) {
+            player.sendMessage(color(msg("invalid-format")));
+            return;
+        }
+
+        int minY = clipboard.getRegion().getMinimumPoint().y();
+        int maxY = clipboard.getRegion().getMaximumPoint().y();
+        int height = maxY - minY + 1;
+
+        World world = BukkitAdapter.adapt(player.getWorld());
 
         sendBar(player, msg("paste-start"));
 
         new BukkitRunnable() {
 
-            Clipboard clipboard;
-            int currentY = 0;
-            int maxY;
+            int currentLayer = 0;
 
             @Override
             public void run() {
-                try {
-                    if (clipboard == null) {
-                        ClipboardReader reader =
-                                ClipboardFormats.findByFile(file)
-                                        .getReader(new FileInputStream(file));
-                        clipboard = reader.read();
-                        maxY = clipboard.getRegion().getHeight();
-                    }
+                if (currentLayer >= height) {
+                    sendBar(player, msg("done"));
+                    cancel();
+                    return;
+                }
 
-                    if (currentY >= maxY) {
-                        sendBar(player, msg("done"));
-                        cancel();
-                        return;
-                    }
+                try (EditSession session = WorldEdit.getInstance().newEditSession(world)) {
+                    ClipboardHolder holder = new ClipboardHolder(clipboard);
 
-                    World world = BukkitAdapter.adapt(player.getWorld());
+                    // Вставка слоя через Paste
+                    Operation op = holder.createPaste(session)
+                            .to(BlockVector3.at(x, y, z))
+                            .ignoreAirBlocks(true)
+                            .build();
 
-                    try (EditSession session = WorldEdit.getInstance().newEditSession(world)) {
-                        ClipboardHolder holder = new ClipboardHolder(clipboard);
-                        Operation op = holder.createPaste(session)
-                                .to(BlockVector3.at(x, y + currentY, z))
-                                .ignoreAirBlocks(true)
-                                .build();
-                        Operations.complete(op);
-                    }
-
-                    int percent = (int) ((currentY / (double) maxY) * 100);
-                    sendBar(player, msg("progress")
-                            .replace("%percent%", String.valueOf(percent)));
-
-                    getLogger().info("Pasted layer Y=" + (y + currentY));
-                    currentY++;
-
+                    Operations.complete(op);
                 } catch (Exception e) {
                     e.printStackTrace();
                     cancel();
+                    return;
                 }
+
+                int percent = (int) ((currentLayer + 1) * 100.0 / height);
+                sendBar(player, msg("progress").replace("%percent%", String.valueOf(percent)));
+
+                currentLayer++;
             }
         }.runTaskTimer(this, 0L, 2L);
     }
@@ -225,10 +230,7 @@ public final class SchematicHelper extends JavaPlugin {
     // ===================== UTILS =====================
 
     private void sendBar(Player player, String text) {
-        player.spigot().sendMessage(
-                ChatMessageType.ACTION_BAR,
-                new TextComponent(color(text))
-        );
+        player.spigot().sendMessage(ChatMessageType.ACTION_BAR, new TextComponent(color(text)));
     }
 
     private String msg(String key) {

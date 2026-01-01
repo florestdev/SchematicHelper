@@ -6,7 +6,7 @@
 
     <groupId>ru.florestdev</groupId>
     <artifactId>SchematicHelper</artifactId>
-    <version>1.0</version>
+    <version>1.0-fixed</version>
     <packaging>jar</packaging>
 
     <name>SchematicHelper</name>
